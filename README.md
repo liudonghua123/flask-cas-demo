@@ -8,4 +8,4 @@ This is a simple cas demo for flask framework which connect to the sso of ynu
 4. python app.py
 
 ### License
-MIT
+[MIT](LICENSE)
