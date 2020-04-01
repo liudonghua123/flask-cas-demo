@@ -1,2 +1,2 @@
-git+https://github.com/liudonghua123/Flask-CAS.git#v1.0.2
+git+https://github.com/liudonghua123/Flask-CAS.git@list_of_memberOf
 flask-debugtoolbar
