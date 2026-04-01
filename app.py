@@ -1,67 +1,78 @@
-from flask import Flask, render_template
-from flask_cas import CAS, login_required
-from flask_cas import login
-from flask_cas import logout
+import os
+from flask import Flask, request, session, redirect, url_for, render_template, flash
+from cas import CASClient
 import logging
-from pprint import pprint
-# from flask.globals import _request_ctx_stack
-# ImportError: cannot import name '_request_ctx_stack' from 'flask.globals'
-# from flask_debugtoolbar import DebugToolbarExtension
 
 app = Flask(__name__)
-cas = CAS(app)
+app.secret_key = 'some_secret_key_here'
 
 # configure the cas of ynu
-# app.config['CAS_SERVER'] = 'https://cas.ynou.edu.cn'
-# app.config['CAS_LOGIN_ROUTE'] = '/cas/login'
-# app.config['CAS_LOGOUT_ROUTE'] = '/cas/logout'
-# # app.config['CAS_VALIDATE_ROUTE'] = '/cas/serviceValidate'
-# app.config['CAS_VALIDATE_ROUTE'] = '/cas/p3/serviceValidate'
+CAS_SERVER = 'https://ids.ynu.edu.cn'
 
-# standard cas
-# app.config['CAS_SERVER'] = 'http://localhost:8080'
-# app.config['CAS_LOGIN_ROUTE'] = '/cas/login'
-# app.config['CAS_LOGOUT_ROUTE'] = '/cas/logout'
-# # app.config['CAS_VALIDATE_ROUTE'] = '/cas/serviceValidate'
-# app.config['CAS_VALIDATE_ROUTE'] = '/cas/p3/serviceValidate'
+# Create CAS client using factory
+cas_client = CASClient(
+    version=3,
+    service_url='http://localhost:8080/login',
+    server_url=f"{CAS_SERVER}/authserver/"
+)
 
-# ynu ids cas
-app.config['CAS_SERVER'] = 'https://ids.ynu.edu.cn'
-app.config['CAS_LOGIN_ROUTE'] = '/authserver/login'
-app.config['CAS_LOGOUT_ROUTE'] = '/authserver/logout'
-# app.config['CAS_VALIDATE_ROUTE'] = '/authserver/serviceValidate'
-app.config['CAS_VALIDATE_ROUTE'] = '/authserver/p3/serviceValidate'
+def login_required(f):
+    """Decorator to require CAS login"""
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'username' not in session:
+            return redirect(url_for('login', next=request.url))
+        return f(*args, **kwargs)
+    return decorated_function
 
-# configure some other settings
-app.config['CAS_AFTER_LOGIN'] = '/'
-app.config['SECRET_KEY'] = 'some_secret_key_here'
-
-# # set the configration of flask_debugtoolbar
-# app.config['DEBUG_TB_ENABLED'] = True
-# # the toolbar is only enabled in debug mode:
-# app.debug = True
-# https://pypi.org/project/Flask-DebugToolbar/
-# toolbar = DebugToolbarExtension(app)
-
-    
 @app.route("/")
-@login_required
 def index():
-    username = cas.username
-    return "This is protected index content of " + username
+    next_url = request.args.get('next')
+    if next_url:
+        return redirect(next_url)
+    return render_template('index.html')
 
-@app.route("/protected/")
+@app.route("/protected")
 @login_required
 def protected():
-    # import pdb; pdb.set_trace()
-    # pprint(vars(cas))
-    username = cas.username
-    # cas.attributes['myattr'] = 'myvalue'
-    # return "This is protected content of " + username
-    return render_template('protected.html', username = username, cas = cas)
+    username = session.get('username')
+    attributes = session.get('attributes', {})
+    return render_template('protected.html', username=username, attributes=attributes)
 
-@app.route("/public/")
-def public():
-    return "This is public content!"
+@app.route("/login")
+def login():
+    """CAS login handler"""
+    next_url = request.args.get('next') or url_for('index')
+    if 'username' in session:
+        return redirect(next_url)
 
-app.run(host='0.0.0.0', port=8080, debug=True)
+    ticket = request.args.get('ticket')
+    if not ticket:
+        cas_login_url = cas_client.get_login_url()
+        app.logger.debug('CAS login URL: %s', cas_login_url)
+        return redirect(f'{cas_login_url}?next={next_url}')
+    
+    app.logger.debug('ticket: %s', ticket)
+
+    user, attributes, pgtiou = cas_client.verify_ticket(ticket)
+    app.logger.debug('CAS verify: user=%s, attributes=%s, pgtiou=%s', user, attributes, pgtiou)
+
+    if not user:
+        flash('Failed to verify ticket', 'error')
+        return redirect(url_for('login'))
+    else:
+        session['username'] = user
+        session['attributes'] = attributes or {}
+        flash(f'Welcome, {user}!', 'success')
+        return redirect(next_url)
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    redirect_url = url_for('index', _external=True)
+    cas_logout_url = cas_client.get_logout_url(redirect_url)
+    return redirect(cas_logout_url)
+
+if __name__ == "__main__":
+    app.run(host='0.0.0.0', port=8080, debug=True)

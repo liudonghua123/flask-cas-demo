@@ -1,2 +1,2 @@
-git+https://github.com/liudonghua123/Flask-CAS.git@list_of_memberOf
-flask-debugtoolbar
+python-cas>=1.6.0
+flask>=2.0.0
